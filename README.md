@@ -2,6 +2,11 @@
 
 More info at https://www.eionix.co.in/2019/10/10/reverse-engineer-ddpai-firmware.html
 
+# Docker build
+```
+docker build . -f Dockerfile.multistage -t go-sample-app-multi
+```
+
 # POST commands
 http://193.168.0.1/vcam/cmd.cgi?cmd=APP_EventListReq
 http://193.168.0.1/G_20230214105816_052_0030.mp4
