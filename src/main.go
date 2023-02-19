@@ -101,7 +101,7 @@ func init() {
 }
 
 func main() {
-   updateTheFileHistory(cfg.StoragePath + "/continuos/")
+   updateTheFileHistory(cfg.StoragePath + "/recordings/")
    go checkDashCam(cfg.CamURL, cfg.StoragePath, cfg.Interval, cfg.Timeout, cfg.HistoryLimit)
 
    e := echo.New()
@@ -210,7 +210,7 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
                      break
                   }
                   // Download
-                  err, path := downloadFile(mediaPath + "/continuos/" + file.Name, camPath + "/" + file.Name, timeout)
+                  err, path := downloadFile(mediaPath + "/recordings/" + file.Name, camPath + "/" + file.Name, timeout)
                   if err != nil  {
                      log.Println(err)
                      deleteFile(path)
