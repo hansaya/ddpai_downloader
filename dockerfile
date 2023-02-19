@@ -1,12 +1,12 @@
-FROM golang:1.16-alpine
+FROM golang:1.20-alpine
 
 WORKDIR /app
 
-COPY ../src/go.mod ./
-COPY ../src/go.sum ./
+COPY src/go.mod ./
+COPY src/go.sum ./
 RUN go mod download
 
-COPY ../src/*.go ./
+COPY src/*.go ./
 
 RUN go build -o /ddpai-downloader
 

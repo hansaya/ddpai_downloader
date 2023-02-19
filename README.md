@@ -4,7 +4,7 @@ More info at https://www.eionix.co.in/2019/10/10/reverse-engineer-ddpai-firmware
 
 # Docker build
 ```
-docker build . -f Dockerfile.multistage -t go-sample-app-multi
+docker build . -f Dockerfile.multistage -t ddpai-downloader-test
 ```
 
 # POST commands
