@@ -4,5 +4,5 @@ Simple project to download ddpai dash camera footage when car is parked in your 
 
 # Docker example
 ```
-docker run -d -v /path/on/host:/mnt/dvr/ --name="ddpai_downloader" -e STORAGE_PATH=/mnt/dvr/ -e RECORDING_HISTORY=96h ghcr.io/hansaya/ddpai_downloader:main
+docker run --rm -d -v /path/on/host:/mnt/dvr/ --name="ddpai_downloader" -e STORAGE_PATH=/mnt/dvr/ -e RECORDING_HISTORY=96h ghcr.io/hansaya/ddpai_downloader:main
 ```

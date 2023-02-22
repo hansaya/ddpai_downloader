@@ -319,7 +319,8 @@ func updateTheFileHistory (path string) {
    p := filepath.FromSlash(path)
    files, err := ioutil.ReadDir(p)
    if err != nil {
-      log.Fatal(err)
+      log.Warn(err)
+      return
    }
 
    for _, file := range files {
@@ -327,10 +328,8 @@ func updateTheFileHistory (path string) {
       if err != nil {
          log.Warn(err)
       } else {
-         // fileInfo := FileInfo{file.Name(), date}
          FileHistory[p+file.Name()] = date
       }
-      // log.Info(FileHistory[p+file.Name()])
    }
    log.Info("Found ", len(FileHistory), " saved items locally")
 }
