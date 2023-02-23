@@ -178,14 +178,14 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
                for _, event := range EventList.Event {
                   err, path := downloadFile(mediaPath + "/events/" + event.Bvideoname, camPath + "/" + event.Bvideoname, timeout)
                   if err != nil  {
-                     log.Println(err)
+                     log.Warn(err)
                      deleteFile(path)
                      break
                   }
                   // Download
                   err, path = downloadFile(mediaPath + "/events/" + event.Imgname, camPath + "/" + event.Imgname, timeout)
                   if err != nil  {
-                     log.Println(err)
+                     log.Warn(err)
                      deleteFile(path)
                      break
                   }
@@ -202,17 +202,17 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
                   date, err := fileNameToDate(file.Name)
                   if err != nil {
                         log.Warn(err)
-                        break
+                        continue
                   }
                   // Skip downloading old files
                   if date.Before(time.Now().Add(-historyLimit)) {
                      log.Debug("Skipping ", file.Index, ". Recording ", file.Name, " too old")
-                     break
+                     continue
                   }
                   // Download
                   err, path := downloadFile(mediaPath + "/recordings/" + file.Name, camPath + "/" + file.Name, timeout)
                   if err != nil  {
-                     log.Println(err)
+                     log.Warn(err)
                      deleteFile(path)
                      break
                   } else {
@@ -311,7 +311,7 @@ func deleteFile (path string) {
    log.Debug("Deleting file " + path)
    e := os.Remove(path)
    if e != nil {
-      log.Print(e)
+      log.Warn(e)
    }
 }
 
