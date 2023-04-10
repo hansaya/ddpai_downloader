@@ -12,8 +12,6 @@ import (
    "os/signal"
    "syscall"
    "strings"
-   // "strconv"
-   // "context"
    log "github.com/sirupsen/logrus"
    "github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -21,16 +19,10 @@ import (
 )
 
 var (
-   //  log.Warnogger
-   //  InfoLogger    *log.Logger
-   //  ErrorLogger   *log.Logger
     FileHistory = map[string]time.Time{}
     Exiting bool
     LocalTimeZone *time.Location
     cfg config
-//     t := time.Now()
-//     zone, offset := t.Zone()
-//     loc, _ := time.LoadLocation("Europe/Berlin")
 )
 
 type config struct {
@@ -38,7 +30,7 @@ type config struct {
 	StoragePath  string        `env:"STORAGE_PATH" envDefault:"${PWD}" envExpand:"true"`
 	CamURL       string        `env:"CAM_URL" envDefault:"http://193.168.0.1"`
 	Interval     time.Duration `env:"INTERVAL" envDefault:"30s"`
-	Timeout      time.Duration `env:"TIMEOUT" envDefault:"60s"`
+	Timeout      time.Duration `env:"TIMEOUT" envDefault:"120s"`
 	HistoryLimit time.Duration `env:"RECORDING_HISTORY" envDefault:"96h"`
    LogLevel     string        `env:"LOG_LEVEL" envDefault:"info"`
 }
