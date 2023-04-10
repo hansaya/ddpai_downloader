@@ -5,7 +5,8 @@ I own an DDPai Mini 5 camera. Which comes with an app and can be able to connect
 Special thanks go to author of https://www.eionix.co.in/2019/10/10/reverse-engineer-ddpai-firmware.html
 
 # Features
-- [x] Download Recordings
+- [x] Download Continuos Recordings
+- [x] Download Timelapse/Parking mode recordings
 - [x] Download Events
 - [x] Rotating History
 - [ ] HTTP Health status
