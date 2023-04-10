@@ -25,21 +25,17 @@ We need solve two issues:
 
 ### My Solution:
 
-Hardware:
 * For the wifi radio I went with [Mikrotik SXTsq 5](https://mikrotik.com/product/sxtsq_5_high_power). Readily available and cheap. Only issue is, AP only connect at 100mbs and seems like camera can easily saturate the link. If you find a better radio for this application, let me know. 
-
-![My setup](docs/my-setup.jpg)
+![My setup](docs/my-setup.png)
 1) Give AP a static IP in the range of 193.168.0.x/24
 2) Set a bridge between Ethernet and WLAN
 ![WLAN bridge](docs/wlan-bridge.png)
 3) Set the security key for the camera and connect to the camera
 ![WLAN Key](docs/wireless-key.png)
 ![WLAN Interface](docs/wlan-interface.png)
-
 This should let you connect to the camera network through the access point ethernet port.
 
 * For networking, I ended up connecting the radio to a my pfsense router and treat the AP as a gateway. Then I redirected any requests that goes to 193.168.0.1 into the correct gateway. I'm sure there are other ways to do this but I found this to be reliable. Since the camera is on a public ip range, it was easy to make a pfsense firewall rule to redirect. DO NOT CONNECT THE ACCESS POINT TO YOUR NORMAL NETWORK, UNLESS YOU RUN IT THROUGH A VLAN! Having two dhcp servers in your home network will cause issues.
-
 1) Set a new interface in pfsense and DHCP as he IPv4 config type. If everything is connected correctly, you should see pfsense getting an IP from the camera.
 ![Pfsense Interface](docs/pfsense-int.png)
 2) Create a gateway so that we can forward the traffic to it.
@@ -51,8 +47,8 @@ Now you should be able to use your browser to to hit this link [http://193.168.0
 
 ### Alternative Solutions
 
-* Connect to the camera using a WIFI dongle using your server/computer.
-* Use a raspberry pi to connect.
+1) Connect to the camera using a WIFI dongle using your server/computer.
+2) Use a Raspberry Pi to connect.
 
 ## Running the application
 Example:
