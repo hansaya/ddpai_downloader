@@ -9,6 +9,7 @@ Special thanks go to author of https://www.eionix.co.in/2019/10/10/reverse-engin
 - [x] Download Timelapse/Parking mode recordings
 - [x] Download Events
 - [x] Rotating History
+- [x] GPS files
 - [ ] HTTP Health status
 - [ ] Delete Events after downloading
 

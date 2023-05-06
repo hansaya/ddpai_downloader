@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -23,10 +24,11 @@ var (
 	FileHistory   = map[string]time.Time{}
 	Exiting       bool
 	LocalTimeZone *time.Location
-	cfg           config
+	cfg           Config
+	camera        DdpaiCamera
 )
 
-type config struct {
+type Config struct {
 	HttpPort     string        `env:"HTTP_PORT" envDefault:"8080"`
 	StoragePath  string        `env:"STORAGE_PATH" envDefault:"${PWD}" envExpand:"true"`
 	CamURL       string        `env:"CAM_URL" envDefault:"http://193.168.0.1"`
@@ -36,7 +38,7 @@ type config struct {
 	LogLevel     string        `env:"LOG_LEVEL" envDefault:"info"`
 }
 
-type eventList struct {
+type EventList struct {
 	Num   int `json:"num"`
 	Event []struct {
 		Index      string `json:"index"`
@@ -59,16 +61,48 @@ type PlaybackList struct {
 	} `json:"file"`
 }
 
-type jsonHeader struct {
+type GpsFileList struct {
+	Num  int `json:"num"`
+	File []struct {
+		Index      string `json:"index"`
+		Type       string `json:"type"`
+		Starttime  string `json:"starttime"`
+		Endtime    string `json:"endtime"`
+		Name       string `json:"name"`
+		Parentfile string `json:"parentfile"`
+	} `json:"file"`
+}
+
+type Session struct {
+	AcSessionID string `json:"acSessionId"`
+}
+
+type JsonHeader struct {
 	Errcode int    `json:"errcode"`
 	Data    string `json:"data"`
+}
+
+type File struct {
+	name string
+	url  string
+	date time.Time
+}
+type FileList []File
+
+type DdpaiCamera struct {
+	camPath      string
+	session      Session
+	eventList    EventList
+	playbackList PlaybackList
+	gpsFileList  GpsFileList
+	httpClient   http.Client
 }
 
 func init() {
 	t := time.Now()
 	LocalTimeZone = t.Location()
 
-	cfg = config{}
+	cfg = Config{}
 	if err := env.Parse(&cfg); err != nil {
 		log.Error()
 	} else {
@@ -94,8 +128,9 @@ func init() {
 }
 
 func main() {
+	camera = makeCamera(cfg.CamURL, 1*time.Second)
 	updateTheFileHistory(cfg.StoragePath + "/recordings/")
-	go checkDashCam(cfg.CamURL, cfg.StoragePath, cfg.Interval, cfg.Timeout, cfg.HistoryLimit)
+	go checkDashCam(cfg.StoragePath, cfg.Interval, cfg.Timeout, cfg.HistoryLimit)
 
 	e := echo.New()
 	e.Use(middleware.Logger())
@@ -128,7 +163,7 @@ func SetupCloseHandler() {
 	}()
 }
 
-func checkDashCam(camPath string, mediaPath string, interval time.Duration, timeout time.Duration, historyLimit time.Duration) {
+func checkDashCam(mediaPath string, interval time.Duration, timeout time.Duration, historyLimit time.Duration) {
 	ticker := time.NewTicker(interval)
 	go func() {
 		for {
@@ -146,38 +181,18 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
 				}
 
 				// Check whether camera can be reach before doing any requests
-				var myClient = &http.Client{Timeout: 1 * time.Second}
-				_, err := myClient.Get(camPath)
-
-				if err != nil {
-					log.Warn("Cannot reach the Camera.. trying again in ", interval.String())
-
-				} else {
-					var playbackList PlaybackList
-					err := getJson(camPath+"/vcam/cmd.cgi?cmd=APP_PlaybackListReq", &playbackList)
-					if err != nil {
-						log.Warn(err)
-						break
-					}
-
-					var EventList eventList
-					err = getJson(camPath+"/vcam/cmd.cgi?cmd=APP_EventListReq", &EventList)
-					if err != nil {
-						log.Warn(err)
-						break
-					}
-
+				if camera.connect() {
 					// Get Event files
-					log.Info(len(EventList.Event), " Event files found")
-					for _, event := range EventList.Event {
-						err, path := downloadFile(mediaPath+"/events/"+event.Bvideoname, camPath+"/"+event.Bvideoname, timeout)
-						if err != nil {
-							log.Warn(err)
-							deleteFile(path)
-							break
-						}
-						// Download
-						err, path = downloadFile(mediaPath+"/events/"+event.Imgname, camPath+"/"+event.Imgname, timeout)
+					log.Info("getting the event list...")
+					err, eventList := camera.getEvents()
+					if err != nil {
+						log.Info("something went wrong with event list...")
+						log.Warn(err)
+						break
+					}
+					log.Info(len(eventList), " Event files found")
+					for _, event := range eventList {
+						err, path := downloadFile(mediaPath+"/events/"+event.name, event.url, timeout, event.date)
 						if err != nil {
 							log.Warn(err)
 							deleteFile(path)
@@ -190,34 +205,64 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
 					}
 
 					// Get timelapse and continuous recordings
-					log.Info(len(playbackList.File), " Recording files found")
-					for i := range playbackList.File {
-						file := playbackList.File[len(playbackList.File)-i-1]
-						date, err := fileNameToDate(file.Name)
-						if err != nil {
-							log.Warn(err)
-							continue
-						}
+					err, recordingList := camera.getRecordings()
+					if err != nil {
+						log.Warn(err)
+						break
+					}
+					log.Info(len(recordingList), " Recording files found")
+					for _, recording := range recordingList {
 						// Skip downloading old files
-						if date.Before(time.Now().Add(-historyLimit)) {
-							log.Debug("Skipping ", file.Index, ". Recording ", file.Name, " too old")
+						if recording.date.Before(time.Now().Add(-historyLimit)) {
+							log.Debug("Skipping .... Recording ", recording.name, " too old")
 							continue
 						}
 						// Download
-						err, path := downloadFile(mediaPath+"/recordings/"+file.Name, camPath+"/"+file.Name, timeout)
+						err, path := downloadFile(mediaPath+"/recordings/"+recording.name, recording.url, timeout, recording.date)
 						if err != nil {
 							log.Warn(err)
 							deleteFile(path)
 							break
 						} else {
 							// Save the file name in the history
-							FileHistory[path] = date
+							FileHistory[path] = recording.date
 						}
 						// After done Downloading if asked, exit. This will help to prevent half written files
 						if Exiting {
 							os.Exit(0)
 						}
 					}
+
+					// Get GPS files
+					err, gpsList := camera.getGpsFiles()
+					if err != nil {
+						log.Warn(err)
+						break
+					}
+					log.Info(len(gpsList), " GPS files found")
+					for _, gpsFile := range gpsList {
+						// Skip downloading old files
+						if gpsFile.date.Before(time.Now().Add(-historyLimit)) {
+							log.Debug("Skipping .... GPS ", gpsFile.name, " too old")
+							continue
+						}
+						// Download
+						err, path := downloadFile(mediaPath+"/recordings/"+gpsFile.name, gpsFile.url, timeout, gpsFile.date)
+						if err != nil {
+							log.Warn(err)
+							deleteFile(path)
+							break
+						} else {
+							// Save the file name in the history
+							FileHistory[path] = gpsFile.date
+						}
+						// After done Downloading if asked, exit. This will help to prevent half written files
+						if Exiting {
+							os.Exit(0)
+						}
+					}
+				} else {
+					log.Warn("Cannot reach the Camera.. trying again in ", interval.String())
 				}
 			case <-quit:
 				ticker.Stop()
@@ -228,28 +273,8 @@ func checkDashCam(camPath string, mediaPath string, interval time.Duration, time
 	}()
 }
 
-// Get the json output from the API call
-func getJson(url string, target interface{}) error {
-
-	httpClient := &http.Client{Timeout: 4 * time.Second}
-	resp, err := httpClient.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Remove the header
-	var test jsonHeader
-	err = json.NewDecoder(resp.Body).Decode(&test)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal([]byte(test.Data), &target)
-}
-
 // Download media from the camera
-func downloadFile(path string, url string, timeout time.Duration) (err error, file string) {
+func downloadFile(path string, url string, timeout time.Duration, timestamp time.Time) (err error, file string) {
 
 	// Search the history first. Only works with continuous recordings
 	p := filepath.FromSlash(path)
@@ -324,6 +349,13 @@ Loop:
 		return err, p
 	}
 
+	// Set the modified time
+	currentTime := time.Now().Local()
+	err = os.Chtimes(p, currentTime, timestamp)
+	if err != nil {
+		log.Warn(err)
+	}
+
 	log.Info("Download completed ", resp.Duration(), " size:", resp.Size())
 
 	return nil, p
@@ -349,7 +381,7 @@ func updateTheFileHistory(path string) {
 	}
 
 	for _, file := range files {
-		date, err := fileNameToDate(file.Name())
+		date, err := camera.fileNameToDate(file.Name())
 		if err != nil {
 			log.Warn(err)
 		} else {
@@ -359,7 +391,146 @@ func updateTheFileHistory(path string) {
 	log.Info("Found ", len(FileHistory), " saved items locally")
 }
 
-func fileNameToDate(fileName string) (stamp time.Time, err error) {
+func checkHistory(length time.Duration) (count int) {
+	for fileName, date := range FileHistory {
+		if date.Before(time.Now().Add(-length)) {
+			count++
+			deleteFile(fileName)
+			delete(FileHistory, fileName)
+		}
+	}
+	return count
+}
+
+func makeCamera(camPath string, timeout time.Duration) DdpaiCamera {
+	return DdpaiCamera{
+		camPath:    camPath,
+		httpClient: http.Client{Timeout: timeout},
+	}
+}
+
+func (c *DdpaiCamera) connect() bool {
+	_, err := c.httpClient.Get(c.camPath)
+	if err != nil {
+		c.reset()
+		return false
+	} else {
+		if c.session.AcSessionID == "" {
+			c.auth()
+			c.requestCert()
+		}
+		return true
+	}
+}
+
+func (c *DdpaiCamera) reset() {
+	c.session.AcSessionID = ""
+}
+
+func (c *DdpaiCamera) getRecordings() (error, FileList) {
+	var list FileList
+	err := c.getJson(c.camPath+"/vcam/cmd.cgi?cmd=APP_PlaybackListReq", &c.playbackList)
+	if err != nil {
+		c.reset()
+		return err, list
+	}
+
+	// Get timelapse and continuous recordings
+	for i := range c.playbackList.File {
+		rec := c.playbackList.File[len(c.playbackList.File)-i-1]
+		date, err := c.fileNameToDate(rec.Name)
+		if err != nil {
+			return err, list
+		}
+		// Download
+		list = append(list, File{
+			name: rec.Name,
+			url:  c.camPath + "/" + rec.Name,
+			date: date,
+		})
+	}
+	return nil, list
+}
+
+func (c *DdpaiCamera) getEvents() (error, FileList) {
+	var list FileList
+	err := c.getJson(c.camPath+"/vcam/cmd.cgi?cmd=APP_EventListReq", &c.eventList)
+	if err != nil {
+		c.reset()
+		return err, list
+	}
+
+	// Get Event files
+	for _, event := range c.eventList.Event {
+		date, err := c.fileNameToDate(event.Bvideoname)
+		if err != nil {
+			return err, list
+		}
+		list = append(list, File{
+			name: event.Bvideoname,
+			url:  c.camPath + "/" + event.Bvideoname,
+			date: date,
+		})
+		list = append(list, File{
+			name: event.Imgname,
+			url:  c.camPath + "/" + event.Imgname,
+			date: date,
+		})
+	}
+	return nil, list
+}
+
+func (c *DdpaiCamera) getGpsFiles() (error, FileList) {
+	var list FileList
+	err := c.getJson(c.camPath+"/vcam/cmd.cgi?cmd=API_GpsFileListReq", &c.gpsFileList)
+	if err != nil {
+		c.reset()
+		return err, list
+	}
+
+	// Get Event files
+	for _, gpsF := range c.gpsFileList.File {
+		date, err := c.fileNameToDate(gpsF.Name)
+		if err != nil {
+			return err, list
+		}
+		list = append(list, File{
+			name: gpsF.Name,
+			url:  c.camPath + "/" + gpsF.Name,
+			date: date,
+		})
+	}
+	return nil, list
+}
+
+// Get the json output from the API call
+func (c DdpaiCamera) getJson(url string, target interface{}) error {
+
+	req, _ := http.NewRequest("GET", url, nil)
+	if c.session.AcSessionID != "" {
+		req.Header.Set("sessionid", c.session.AcSessionID)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Remove the header
+	var jsonDump JsonHeader
+	err = json.NewDecoder(resp.Body).Decode(&jsonDump)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal([]byte(jsonDump.Data), &target)
+}
+
+func (c *DdpaiCamera) auth() {
+	c.getJson(c.camPath+"/vcam/cmd.cgi?cmd=API_RequestSessionID", &c.session)
+}
+
+func (c DdpaiCamera) fileNameToDate(fileName string) (stamp time.Time, err error) {
 	split := strings.Split(fileName, "_")
 	var date time.Time
 	// Time laps vs normal video
@@ -377,13 +548,21 @@ func fileNameToDate(fileName string) (stamp time.Time, err error) {
 	return date, nil
 }
 
-func checkHistory(length time.Duration) (count int) {
-	for fileName, date := range FileHistory {
-		if date.Before(time.Now().Add(-length)) {
-			count++
-			deleteFile(fileName)
-			delete(FileHistory, fileName)
-		}
+func (c DdpaiCamera) requestCert() error {
+
+	var jsonData = []byte(`{
+		"user": "admin",
+		"password": "admin",
+		"level": 0,
+		"uid": "f2cf6a332999fbc3"}`)
+	request, _ := http.NewRequest("POST", c.camPath+"/vcam/cmd.cgi?cmd=API_RequestCertificate", bytes.NewBuffer(jsonData))
+	request.Header.Set("Cookie", "SessionID="+c.session.AcSessionID)
+	request.Header.Set("sessionid", c.session.AcSessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return err
 	}
-	return count
+	defer response.Body.Close()
+	return nil
 }
