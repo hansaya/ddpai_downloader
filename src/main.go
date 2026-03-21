@@ -462,20 +462,30 @@ func (c *DdpaiCamera) getEvents() (error, FileList) {
 
 	// Get Event files
 	for _, event := range c.eventList.Event {
+		// Skip malformed entries with no video file (e.g. corrupt/incomplete camera events)
+		if event.Bvideoname == "" {
+			log.Warn("Skipping malformed event entry with no video file, index: ", event.Index)
+			continue
+		}
 		date, err := c.fileNameToDate(event.Bvideoname)
 		if err != nil {
-			return err, list
+			// Skip entries where the filename can't be parsed instead of stopping everything
+			log.Warn("Skipping event with unparseable filename: ", event.Bvideoname, " error: ", err)
+			continue
 		}
 		list = append(list, File{
 			name: event.Bvideoname,
 			url:  c.camPath + "/" + event.Bvideoname,
 			date: date,
 		})
-		list = append(list, File{
-			name: event.Imgname,
-			url:  c.camPath + "/" + event.Imgname,
-			date: date,
-		})
+		// Only add thumbnail if it exists
+		if event.Imgname != "" {
+			list = append(list, File{
+				name: event.Imgname,
+				url:  c.camPath + "/" + event.Imgname,
+				date: date,
+			})
+		}
 	}
 	return nil, list
 }
