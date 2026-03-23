@@ -133,7 +133,12 @@ func main() {
 	go checkDashCam(cfg.StoragePath, cfg.Interval, cfg.Timeout, cfg.HistoryLimit)
 
 	e := echo.New()
-	e.Use(middleware.Logger())
+	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+		Skipper: func(c echo.Context) bool {
+			path := c.Path()
+			return path == "/ping" || path == "/health"
+		},
+	}))
 	e.Use(middleware.Recover())
 	e.GET("/ping", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, struct{ Status string }{Status: "OK"})
