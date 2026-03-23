@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,12 +22,22 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// ErrSkipRecent means the file recently failed (e.g. EOF - likely deleted on camera); skip and continue with others.
+var ErrSkipRecent = errors.New("skip: recently failed, likely deleted on camera")
+
 var (
 	FileHistory   = map[string]time.Time{}
 	Exiting       bool
 	LocalTimeZone *time.Location
 	cfg           Config
 	camera        DdpaiCamera
+)
+
+// failedDownloads caches URLs that recently failed with EOF (file likely deleted on camera); skip for a while.
+var (
+	failedDownloads   = map[string]time.Time{}
+	failedDownloadsMu sync.Mutex
+	failedDownloadTTL = 15 * time.Minute
 )
 
 // Minimum size for valid video/photo files; smaller files are treated as corrupt (e.g. 58-byte stubs)
@@ -217,10 +229,13 @@ func checkDashCam(mediaPath string, interval time.Duration, timeout time.Duratio
 					log.Info(len(eventList), " Event files found")
 					for _, event := range eventList {
 						err, path := downloadFile(mediaPath+"/events/"+event.name, event.url, timeout, event.date)
+						if errors.Is(err, ErrSkipRecent) {
+							continue
+						}
 						if err != nil {
 							log.Warn(err)
 							deleteFile(path)
-							break
+							continue
 						}
 						// After done Downloading if asked, exit. This will help to prevent half written files
 						if Exiting {
@@ -243,14 +258,16 @@ func checkDashCam(mediaPath string, interval time.Duration, timeout time.Duratio
 						}
 						// Download
 						err, path := downloadFile(mediaPath+"/recordings/"+recording.name, recording.url, timeout, recording.date)
+						if errors.Is(err, ErrSkipRecent) {
+							continue
+						}
 						if err != nil {
 							log.Warn(err)
 							deleteFile(path)
-							break
-						} else {
-							// Save the file name in the history
-							FileHistory[path] = recording.date
+							continue
 						}
+						// Save the file name in the history
+						FileHistory[path] = recording.date
 						// After done Downloading if asked, exit. This will help to prevent half written files
 						if Exiting {
 							os.Exit(0)
@@ -272,14 +289,16 @@ func checkDashCam(mediaPath string, interval time.Duration, timeout time.Duratio
 						}
 						// Download
 						err, path := downloadFile(mediaPath+"/recordings/"+gpsFile.name, gpsFile.url, timeout, gpsFile.date)
+						if errors.Is(err, ErrSkipRecent) {
+							continue
+						}
 						if err != nil {
 							log.Warn(err)
 							deleteFile(path)
-							break
-						} else {
-							// Save the file name in the history
-							FileHistory[path] = gpsFile.date
+							continue
 						}
+						// Save the file name in the history
+						FileHistory[path] = gpsFile.date
 						// After done Downloading if asked, exit. This will help to prevent half written files
 						if Exiting {
 							os.Exit(0)
@@ -302,32 +321,41 @@ func downloadFile(path string, url string, timeout time.Duration, timestamp time
 	p := filepath.FromSlash(path)
 	log.WithFields(log.Fields{"file": p, "url": url})
 
-	// Search the history first. Only works with continuous recordings
+	// If we already have a valid file, succeed regardless of failed cache (file exists = success)
 	_, found := FileHistory[p]
 	if found {
 		log.Debug("File already downloaded ", p)
 		return nil, p
 	}
-
-	// If file exists, check if it's valid (not a corrupt stub). Corrupt files get deleted for retry.
-	if info, err := os.Stat(p); err == nil {
-		if info.Size() >= minValidFileSize {
-			log.Debug("Skipping File ", p, " (valid, ", info.Size(), " bytes)")
-			return nil, p
-		}
+	if info, err := os.Stat(p); err == nil && info.Size() >= minValidFileSize {
+		log.Debug("Skipping File ", p, " (valid, ", info.Size(), " bytes)")
+		return nil, p
+	}
+	if info, err := os.Stat(p); err == nil && info.Size() < minValidFileSize {
 		log.Warn("Removing corrupt stub (", info.Size(), " bytes) for retry: ", p)
 		os.Remove(p)
 	}
+
+	// Skip files that recently failed with EOF (only when we don't already have the file)
+	failedDownloadsMu.Lock()
+	if t, ok := failedDownloads[url]; ok && time.Since(t) < failedDownloadTTL {
+		failedDownloadsMu.Unlock()
+		log.Debug("Skipping ", url, " (recently failed): ", p)
+		return ErrSkipRecent, p
+	}
+	failedDownloadsMu.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		return err, p
 	}
 
 	const maxRetries = 3
+	const retryDelay = 5 * time.Second
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
-			log.Info("Retrying download (attempt ", attempt, "/", maxRetries, "): ", url)
+			log.Info("Retrying download (attempt ", attempt, "/", maxRetries, ") after ", retryDelay, ": ", url)
+			time.Sleep(retryDelay)
 		} else {
 			log.Info("Downloading File ", url)
 		}
@@ -336,6 +364,15 @@ func downloadFile(path string, url string, timeout time.Duration, timestamp time
 			return nil, p
 		}
 		log.Warn("Download failed: ", lastErr)
+	}
+	// EOF/connection reset: only cache if we don't have a valid file (avoid false positives when file exists)
+	if lastErr != nil && (strings.Contains(lastErr.Error(), "EOF") || strings.Contains(lastErr.Error(), "connection reset")) {
+		if info, err := os.Stat(p); err != nil || info.Size() < minValidFileSize {
+			failedDownloadsMu.Lock()
+			failedDownloads[url] = time.Now()
+			failedDownloadsMu.Unlock()
+			log.Info("Marking as skipped for 15m: ", url)
+		}
 	}
 	return lastErr, p
 }
@@ -381,6 +418,14 @@ Loop:
 		}
 	}
 	if err := resp.Err(); err != nil {
+		// Camera may report EOF when transfer actually completed; if we got substantial data, treat as success
+		if resp.Size() >= minValidFileSize {
+			log.Info("Download completed with EOF (camera quirk); file valid: ", resp.Size(), " bytes")
+			if e := os.Chtimes(resp.Filename, timestamp, timestamp); e != nil {
+				log.Warn(e)
+			}
+			return nil, p
+		}
 		removePartialFile(resp.Filename)
 		return err, p
 	}
@@ -389,7 +434,7 @@ Loop:
 		removePartialFile(resp.Filename)
 		return fmt.Errorf("file too small (%d bytes), likely corrupt", resp.Size()), p
 	}
-	if err := os.Chtimes(resp.Filename, time.Now().Local(), timestamp); err != nil {
+	if err := os.Chtimes(resp.Filename, timestamp, timestamp); err != nil {
 		log.Warn(err)
 	}
 	log.Info("Download completed ", resp.Duration(), " size:", resp.Size())
@@ -502,6 +547,10 @@ func (c *DdpaiCamera) getRecordings() (error, FileList) {
 			log.Warn("Skipping recording entry with no filename, index: ", rec.Index)
 			continue
 		}
+		if rec.Size <= 0 {
+			log.Debug("Skipping recording still being written (size 0): ", rec.Name)
+			continue
+		}
 		date, err := c.fileNameToDate(rec.Name)
 		if err != nil {
 			log.Warn("Skipping recording with unparseable filename: ", rec.Name, " error: ", err)
@@ -530,6 +579,10 @@ func (c *DdpaiCamera) getEvents() (error, FileList) {
 		// Skip malformed entries with no video file (e.g. corrupt/incomplete camera events)
 		if event.Bvideoname == "" {
 			log.Warn("Skipping malformed event entry with no video file, index: ", event.Index)
+			continue
+		}
+		if event.Bvideosize == "" || event.Bvideosize == "0" {
+			log.Debug("Skipping event still being written (no size): ", event.Bvideoname)
 			continue
 		}
 		date, err := c.fileNameToDate(event.Bvideoname)
