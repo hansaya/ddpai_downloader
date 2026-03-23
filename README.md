@@ -74,6 +74,7 @@ You can modify the existing configuration using these env variables
 | HTTP_PORT     | 8080          | HTTP port. Health: `GET /health` (checks storage), `GET /ping` (alive) |
 | STORAGE_PATH  | ${PWD}        | Location to store the recordings |
 | CAM_URL       | http://193.168.0.1 | Camera URL |
+| CAMERA_TIMEZONE | Local       | IANA timezone for camera timestamps (e.g. `America/Chicago`, `Europe/Berlin`). Set this when the downloader runs in UTC (e.g. K8s) so file mtimes match the filename timestamps. |
 | INTERVAL      | 30s           | Wait period between each camera ping |
 | TIMEOUT       | 120s          | Download timeout. Failed downloads retried up to 3 times; corrupt stubs (under 1KB) removed and re-downloaded. |
 | RECORDING_HISTORY | 96h       | Length of recording history to keep |

@@ -28,7 +28,7 @@ var ErrSkipRecent = errors.New("skip: recently failed, likely deleted on camera"
 var (
 	FileHistory   = map[string]time.Time{}
 	Exiting       bool
-	LocalTimeZone *time.Location
+	cameraTZ      *time.Location
 	cfg           Config
 	camera        DdpaiCamera
 )
@@ -44,13 +44,14 @@ var (
 const minValidFileSize = 1024
 
 type Config struct {
-	HttpPort     string        `env:"HTTP_PORT" envDefault:"8080"`
-	StoragePath  string        `env:"STORAGE_PATH" envDefault:"${PWD}" envExpand:"true"`
-	CamURL       string        `env:"CAM_URL" envDefault:"http://193.168.0.1"`
-	Interval     time.Duration `env:"INTERVAL" envDefault:"30s"`
-	Timeout      time.Duration `env:"TIMEOUT" envDefault:"10s"`
-	HistoryLimit time.Duration `env:"RECORDING_HISTORY" envDefault:"96h"`
-	LogLevel     string        `env:"LOG_LEVEL" envDefault:"info"`
+	HttpPort       string        `env:"HTTP_PORT" envDefault:"8080"`
+	StoragePath    string        `env:"STORAGE_PATH" envDefault:"${PWD}" envExpand:"true"`
+	CamURL         string        `env:"CAM_URL" envDefault:"http://193.168.0.1"`
+	CameraTimeZone string        `env:"CAMERA_TIMEZONE" envDefault:"Local"`
+	Interval       time.Duration `env:"INTERVAL" envDefault:"30s"`
+	Timeout        time.Duration `env:"TIMEOUT" envDefault:"10s"`
+	HistoryLimit   time.Duration `env:"RECORDING_HISTORY" envDefault:"96h"`
+	LogLevel       string        `env:"LOG_LEVEL" envDefault:"info"`
 }
 
 type EventList struct {
@@ -114,13 +115,18 @@ type DdpaiCamera struct {
 }
 
 func init() {
-	t := time.Now()
-	LocalTimeZone = t.Location()
-
+	cameraTZ = time.Local
 	cfg = Config{}
 	if err := env.Parse(&cfg); err != nil {
 		log.Error()
 	} else {
+		if cfg.CameraTimeZone != "" && !strings.EqualFold(cfg.CameraTimeZone, "Local") {
+			if loc, err := time.LoadLocation(cfg.CameraTimeZone); err != nil {
+				log.Warnf("invalid CAMERA_TIMEZONE %q, falling back to Local: %v", cfg.CameraTimeZone, err)
+			} else {
+				cameraTZ = loc
+			}
+		}
 		// Set the default path to current dir
 		if cfg.StoragePath == "" {
 			currentDir, _ := os.Getwd()
@@ -677,7 +683,7 @@ func (c DdpaiCamera) fileNameToDate(fileName string) (stamp time.Time, err error
 	if datePart == "" || len(datePart) != 14 {
 		return time.Time{}, fmt.Errorf("invalid filename format: %q", fileName)
 	}
-	date, err := time.ParseInLocation("20060102150405", datePart, LocalTimeZone)
+	date, err := time.ParseInLocation("20060102150405", datePart, cameraTZ)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("invalid filename format: %q", fileName)
 	}

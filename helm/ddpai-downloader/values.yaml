@@ -13,6 +13,9 @@ env:
   STORAGE_PATH: "/media/dashcam"
   RECORDING_HISTORY: "336h"
   TIMEOUT: "180s"
+  # Set to your camera's IANA timezone so file mtimes match filename timestamps (e.g. America/Chicago, Europe/Berlin).
+  # Required when downloader runs in UTC (K8s) but camera records in local time.
+  # CAMERA_TIMEZONE: "America/Chicago"
 
 securityContext:
   runAsUser: 1004
