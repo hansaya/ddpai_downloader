@@ -138,7 +138,22 @@ func main() {
 	e.GET("/ping", func(c echo.Context) error {
 		return c.JSON(http.StatusOK, struct{ Status string }{Status: "OK"})
 	})
+	e.GET("/health", healthHandler)
 	e.Logger.Fatal(e.Start(":" + cfg.HttpPort))
+}
+
+// healthHandler returns 200 if storage is accessible, 503 otherwise.
+// Does not check camera connectivity - the server is meant to wait for the camera.
+func healthHandler(c echo.Context) error {
+	recordingsPath := filepath.Join(cfg.StoragePath, "recordings")
+	if err := os.MkdirAll(recordingsPath, 0755); err != nil {
+		log.Warn("Health check failed: cannot access storage: ", err)
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{
+			"status": "unhealthy",
+			"reason": "storage inaccessible",
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // SetupCloseHandler creates a 'listener' on a new goroutine which will notify the

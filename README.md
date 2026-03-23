@@ -10,7 +10,7 @@ Special thanks go to author of https://www.eionix.co.in/2019/10/10/reverse-engin
 - [x] Download Events
 - [x] Rotating History
 - [x] GPS files
-- [ ] HTTP Health status
+- [x] HTTP Health status
 - [ ] Delete Events after downloading
 
 # How to get started
@@ -71,7 +71,7 @@ You can modify the existing configuration using these env variables
 
 | Name          | Default       | Description  |
 | ------------- |:-------------:| :-----------:|
-| HTTP_PORT     | 8080          | HTTP health Status. Used for k3s |
+| HTTP_PORT     | 8080          | HTTP port. Health: `GET /health` (checks storage), `GET /ping` (alive) |
 | STORAGE_PATH  | ${PWD}        | Location to store the recordings |
 | CAM_URL       | http://193.168.0.1 | Camera URL |
 | INTERVAL      | 30s           | Wait period between each camera ping |

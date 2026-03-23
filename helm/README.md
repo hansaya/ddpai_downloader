@@ -8,6 +8,19 @@ Helm chart for deploying DDPai Downloader on Kubernetes (e.g. K3s).
 helm install ddpai-downloader ./ddpai-downloader
 ```
 
+## Health checks
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /ping` | Liveness — returns 200 if the server is running |
+| `GET /health` | Readiness — returns 200 if storage (PVC) is accessible, 503 otherwise |
+
+The chart configures Kubernetes probes:
+- **Liveness:** `GET /ping` every 10s (restart if unreachable)
+- **Readiness:** `GET /health` every 10s (exclude from traffic if storage unavailable)
+
+Camera connectivity is not checked — the server is designed to wait for the camera.
+
 ## Default values
 
 | Key | Default | Description |

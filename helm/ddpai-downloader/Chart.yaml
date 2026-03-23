@@ -2,5 +2,5 @@ apiVersion: v2
 name: ddpai-downloader
 description: DDPai dashcam downloader (ghcr.io/hansaya/ddpai_downloader)
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "v1.0.0-alpha-3"
