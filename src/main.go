@@ -438,9 +438,14 @@ func (c *DdpaiCamera) getRecordings() (error, FileList) {
 	// Get timelapse and continuous recordings
 	for i := range c.playbackList.File {
 		rec := c.playbackList.File[len(c.playbackList.File)-i-1]
+		if rec.Name == "" {
+			log.Warn("Skipping recording entry with no filename, index: ", rec.Index)
+			continue
+		}
 		date, err := c.fileNameToDate(rec.Name)
 		if err != nil {
-			return err, list
+			log.Warn("Skipping recording with unparseable filename: ", rec.Name, " error: ", err)
+			continue
 		}
 		// Download
 		list = append(list, File{
@@ -498,11 +503,16 @@ func (c *DdpaiCamera) getGpsFiles() (error, FileList) {
 		return err, list
 	}
 
-	// Get Event files
+	// Get GPS files
 	for _, gpsF := range c.gpsFileList.File {
+		if gpsF.Name == "" {
+			log.Warn("Skipping GPS file entry with no filename, index: ", gpsF.Index)
+			continue
+		}
 		date, err := c.fileNameToDate(gpsF.Name)
 		if err != nil {
-			return err, list
+			log.Warn("Skipping GPS file with unparseable filename: ", gpsF.Name, " error: ", err)
+			continue
 		}
 		list = append(list, File{
 			name: gpsF.Name,
@@ -541,19 +551,22 @@ func (c *DdpaiCamera) auth() {
 }
 
 func (c DdpaiCamera) fileNameToDate(fileName string) (stamp time.Time, err error) {
+	if fileName == "" {
+		return time.Time{}, fmt.Errorf("invalid filename format: %q", fileName)
+	}
 	split := strings.Split(fileName, "_")
-	var date time.Time
-	// Time laps vs normal video
+	var datePart string
 	if len(split) == 4 {
-		date, err = time.ParseInLocation("20060102150405", split[1], LocalTimeZone)
-		if err != nil {
-			return date, err
-		}
+		datePart = split[1]
 	} else {
-		date, err = time.ParseInLocation("20060102150405", split[0], LocalTimeZone)
-		if err != nil {
-			return date, err
-		}
+		datePart = split[0]
+	}
+	if datePart == "" || len(datePart) != 14 {
+		return time.Time{}, fmt.Errorf("invalid filename format: %q", fileName)
+	}
+	date, err := time.ParseInLocation("20060102150405", datePart, LocalTimeZone)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid filename format: %q", fileName)
 	}
 	return date, nil
 }
