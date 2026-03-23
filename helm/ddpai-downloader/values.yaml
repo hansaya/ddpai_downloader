@@ -1,0 +1,37 @@
+replicaCount: 1
+
+# fullnameOverride forces Deployment/Service/PVC names to "ddpai-downloader" instead of "ddpai-downloader-ddpai-downloader"
+fullnameOverride: "ddpai-downloader"
+
+image:
+  repository: ghcr.io/hansaya/ddpai_downloader
+  tag: "v1.0.0-alpha-2"
+  pullPolicy: IfNotPresent
+
+env:
+  HTTP_PORT: "8080"
+  STORAGE_PATH: "/media/dashcam"
+  RECORDING_HISTORY: "336h"
+  TIMEOUT: "180s"
+
+securityContext:
+  runAsUser: 1004
+  runAsGroup: 1004
+  fsGroup: 1004
+
+service:
+  type: ClusterIP
+  port: 8080
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  mountPath: /media
+  # Optional: create PVC instead of existingClaim
+  storageClass: ""
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+podAnnotations: {}
+
+resources: {}

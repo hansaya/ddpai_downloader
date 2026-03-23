@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ddpai-downloader.fullname" . }}
+  labels:
+    app: {{ include "ddpai-downloader.name" . }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.service.port }}
+      targetPort: 8080
+  selector:
+    app: {{ include "ddpai-downloader.name" . }}

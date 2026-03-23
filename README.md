@@ -58,6 +58,10 @@ Now you should be able to use your browser to to hit this link [http://193.168.0
 1) Connect to the camera using a WIFI dongle using your server/computer.
 2) Use a Raspberry Pi to connect.
 
+## Kubernetes / Helm
+
+A [Helm chart](helm/README.md) is provided for deploying on Kubernetes (e.g. K3s). See [helm/README.md](helm/README.md) for defaults, overrides, and Flux usage.
+
 ## Running the application
 Example:
    ```
