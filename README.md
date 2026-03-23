@@ -75,6 +75,6 @@ You can modify the existing configuration using these env variables
 | STORAGE_PATH  | ${PWD}        | Location to store the recordings |
 | CAM_URL       | http://193.168.0.1 | Camera URL |
 | INTERVAL      | 30s           | Wait period between each camera ping |
-| TIMEOUT       | 120s          | Download timeout. This will make the application quit downloading if it takes too long |
+| TIMEOUT       | 120s          | Download timeout. Failed downloads retried up to 3 times; corrupt stubs (under 1KB) removed and re-downloaded. |
 | RECORDING_HISTORY | 96h       | Length of recording history to keep |
 | LOG_LEVEL     | info          | Log level |

@@ -28,6 +28,9 @@ var (
 	camera        DdpaiCamera
 )
 
+// Minimum size for valid video/photo files; smaller files are treated as corrupt (e.g. 58-byte stubs)
+const minValidFileSize = 1024
+
 type Config struct {
 	HttpPort     string        `env:"HTTP_PORT" envDefault:"8080"`
 	StoragePath  string        `env:"STORAGE_PATH" envDefault:"${PWD}" envExpand:"true"`
@@ -129,6 +132,7 @@ func init() {
 
 func main() {
 	camera = makeCamera(cfg.CamURL, 1*time.Second)
+	cleanupStubs(cfg.StoragePath)
 	updateTheFileHistory(cfg.StoragePath + "/recordings/")
 	go checkDashCam(cfg.StoragePath, cfg.Interval, cfg.Timeout, cfg.HistoryLimit)
 
@@ -295,33 +299,49 @@ func checkDashCam(mediaPath string, interval time.Duration, timeout time.Duratio
 
 // Download media from the camera
 func downloadFile(path string, url string, timeout time.Duration, timestamp time.Time) (err error, file string) {
+	p := filepath.FromSlash(path)
+	log.WithFields(log.Fields{"file": p, "url": url})
 
 	// Search the history first. Only works with continuous recordings
-	p := filepath.FromSlash(path)
-	log.WithFields(log.Fields{
-		"file": p,
-		"url":  url})
 	_, found := FileHistory[p]
 	if found {
 		log.Debug("File already downloaded ", p)
 		return nil, p
 	}
 
-	// Create the file
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		os.MkdirAll(filepath.Dir(p), 0700) // Create your file
-	} else {
-		// If we can find the file already, skip
-		f, err := os.Open(p)
-		if err == nil {
-			defer f.Close()
-			log.Debug("Skipping File ", p)
+	// If file exists, check if it's valid (not a corrupt stub). Corrupt files get deleted for retry.
+	if info, err := os.Stat(p); err == nil {
+		if info.Size() >= minValidFileSize {
+			log.Debug("Skipping File ", p, " (valid, ", info.Size(), " bytes)")
 			return nil, p
 		}
+		log.Warn("Removing corrupt stub (", info.Size(), " bytes) for retry: ", p)
+		os.Remove(p)
 	}
-	log.Info("Downloading File ", url)
 
-	// Start downloading the file
+	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+		return err, p
+	}
+
+	const maxRetries = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			log.Info("Retrying download (attempt ", attempt, "/", maxRetries, "): ", url)
+		} else {
+			log.Info("Downloading File ", url)
+		}
+		lastErr, p = doDownload(p, url, timeout, timestamp)
+		if lastErr == nil {
+			return nil, p
+		}
+		log.Warn("Download failed: ", lastErr)
+	}
+	return lastErr, p
+}
+
+func doDownload(path string, url string, timeout time.Duration, timestamp time.Time) (err error, file string) {
+	p := filepath.FromSlash(path)
 	client := grab.NewClient()
 	req, err := grab.NewRequest(filepath.Dir(p), url)
 	if err != nil {
@@ -339,9 +359,8 @@ Loop:
 		select {
 		case <-t.C:
 			log.Debug("Progress ", fmt.Sprintf("%.2f", 100*resp.Progress()))
-
 			if lastProgress == resp.Progress() {
-				if errorCount == 2 { // Warn after 4 seconds
+				if errorCount == 2 {
 					log.Warn("Download not progressing. Timing out in ", timeout.Seconds())
 				}
 				errorCount++
@@ -349,45 +368,63 @@ Loop:
 				errorCount = 0
 				lastProgress = resp.Progress()
 			}
-
 			if Exiting {
 				resp.Cancel()
 				return fmt.Errorf("Downloading Stopped"), p
-			} else if errorCount*2 > int(timeout.Seconds()) {
+			}
+			if errorCount*2 > int(timeout.Seconds()) {
 				resp.Cancel()
 				return fmt.Errorf("Download Timeout"), p
 			}
-
 		case <-resp.Done:
-			// download is complete
 			break Loop
 		}
 	}
-
-	// check for errors
 	if err := resp.Err(); err != nil {
+		removePartialFile(resp.Filename)
 		return err, p
 	}
-
-	// Set the modified time
-	currentTime := time.Now().Local()
-	err = os.Chtimes(p, currentTime, timestamp)
-	if err != nil {
+	// Validate file size; reject corrupt stubs (e.g. 58-byte placeholder)
+	if resp.Size() < minValidFileSize {
+		removePartialFile(resp.Filename)
+		return fmt.Errorf("file too small (%d bytes), likely corrupt", resp.Size()), p
+	}
+	if err := os.Chtimes(resp.Filename, time.Now().Local(), timestamp); err != nil {
 		log.Warn(err)
 	}
-
 	log.Info("Download completed ", resp.Duration(), " size:", resp.Size())
-
 	return nil, p
 }
 
+func removePartialFile(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Warn("Failed to remove partial file ", path, ": ", err)
+	}
+}
+
 func deleteFile(path string) {
-	log.Debug("Deleting file " + path)
-	_, err := os.Open(path)
-	if err == nil {
-		e := os.Remove(path)
-		if e != nil {
-			log.Warn(e)
+	log.Debug("Deleting file ", path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Warn("Failed to delete file ", path, ": ", err)
+	}
+}
+
+func cleanupStubs(storagePath string) {
+	for _, subdir := range []string{"recordings", "events"} {
+		dir := filepath.Join(storagePath, subdir)
+		files, err := ioutil.ReadDir(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Warn("Cannot read ", dir, ": ", err)
+			}
+			continue
+		}
+		for _, f := range files {
+			if f.Size() < minValidFileSize {
+				p := filepath.Join(dir, f.Name())
+				log.Warn("Removing corrupt stub (", f.Size(), " bytes) on startup: ", p)
+				os.Remove(p)
+			}
 		}
 	}
 }
@@ -401,11 +438,14 @@ func updateTheFileHistory(path string) {
 	}
 
 	for _, file := range files {
+		if file.Size() < minValidFileSize {
+			continue // Stubs already cleaned by cleanupStubs; skip from history
+		}
 		date, err := camera.fileNameToDate(file.Name())
 		if err != nil {
 			log.Warn(err)
 		} else {
-			FileHistory[p+file.Name()] = date
+			FileHistory[filepath.Join(p, file.Name())] = date
 		}
 	}
 	log.Info("Found ", len(FileHistory), " saved items locally")
