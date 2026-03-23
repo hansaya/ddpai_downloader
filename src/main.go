@@ -421,7 +421,7 @@ Loop:
 		// Camera may report EOF when transfer actually completed; if we got substantial data, treat as success
 		if resp.Size() >= minValidFileSize {
 			log.Info("Download completed with EOF (camera quirk); file valid: ", resp.Size(), " bytes")
-			if e := os.Chtimes(resp.Filename, timestamp, timestamp); e != nil {
+			if e := os.Chtimes(resp.Filename, time.Now().Local(), timestamp); e != nil {
 				log.Warn(e)
 			}
 			return nil, p
@@ -434,7 +434,7 @@ Loop:
 		removePartialFile(resp.Filename)
 		return fmt.Errorf("file too small (%d bytes), likely corrupt", resp.Size()), p
 	}
-	if err := os.Chtimes(resp.Filename, timestamp, timestamp); err != nil {
+	if err := os.Chtimes(resp.Filename, time.Now().Local(), timestamp); err != nil {
 		log.Warn(err)
 	}
 	log.Info("Download completed ", resp.Duration(), " size:", resp.Size())
